@@ -8,7 +8,7 @@ from scipy.optimize import root_scalar
 # ==========================================================
 
 INT_CMAPS = {
-    "Hot (black→red→yellow→white)": "hot",
+    "Hot ": "hot",
     "Inferno": "inferno",
     "Magma": "magma",
     "Plasma": "plasma",
@@ -145,7 +145,7 @@ def fill_gradient(
         z,
         w,
         cmap='viridis',
-        scale="Liniowa",
+        scale="Linear",
         alpha=1.0,
         r_scale=2.5,
         z_res=400,
@@ -179,7 +179,7 @@ def fill_gradient(
     I[~np.isfinite(I)] = 0.0
 
     # ===== skala =====
-    if scale == "Logarytmiczna":
+    if scale == "Logarithmic":
         I = np.log10(I + 1e-12)
         vmin = -6
         vmax = 0
@@ -217,10 +217,10 @@ def fill_gradient(
 def plot_beam_cross_section(
         ax,
         w_value,
-        cmap='viridis',
-        scale="Liniowa",
+        cmap,
+        scale="Linear",
         grid_size=300,
-        extent_scale=1.5
+        extent_scale=2
     ):
     """
     Rysuje 2D przekrój wiązki Gaussa I(x,y)
@@ -237,7 +237,7 @@ def plot_beam_cross_section(
 
     I[~np.isfinite(I)] = 0.0
 
-    if scale == "Logarytmiczna":
+    if scale == "Logarithmic":
         I = np.log10(I + 1e-12)
         vmin = -6
         vmax = 0
