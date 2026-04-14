@@ -24,36 +24,38 @@ PHASE_CMAPS = {
     "Viridis": "viridis",
     "Gray": "gray",
 }
+
 # ==========================================================
-# ABCD MATRICES (REDUCED COORDINATES y, nθ)
+# CONSTANTS
+# ==========================================================
+
+FIBER_WIDTH = 125.0
+HALF_APERTURE = FIBER_WIDTH / 2.0
+
+# ==========================================================
+# ABCD MATRICES
 # ==========================================================
 
 def M_free_space(d, n):
-    return np.array([
-        [1.0, d / n],
-        [0.0, 1.0]
-    ])
+    return np.array([[1.0, d / n],
+                     [0.0, 1.0]])
 
 def M_spherical(n1, n2, R, flip_R=False):
     if flip_R:
         R = -R
     C = (n1 - n2) / R
-    return np.array([
-        [1.0, 0.0],
-        [C,   1.0]
-    ])
+    return np.array([[1.0, 0.0],
+                     [C,   1.0]])
 
 def calculate_system(elements, R_value, flip_R=False):
     M_total = np.eye(2)
 
     for el in elements:
         if el[0] == "free":
-            d, n = el[1], el[2]
-            M = M_free_space(d, n)
+            M = M_free_space(el[1], el[2])
 
         elif el[0] == "spherical":
-            n1, n2 = el[1], el[2]
-            M = M_spherical(n1, n2, R_value, flip_R)
+            M = M_spherical(el[1], el[2], R_value, flip_R)
 
         M_total = M @ M_total
 
@@ -77,21 +79,22 @@ def apply_abcd(M, q):
 def w_from_q(q, n, lambda0):
     invq = 1.0 / q
     im = np.imag(invq)
+
     if np.abs(im) < 1e-20:
         im = -1e-20
+
     w2 = -lambda0 / (np.pi * n * im)
     return np.sqrt(max(w2, 0.0))
 
 # ==========================================================
-# FOCUS FINDING (REFERENCE PROGRAM METHOD)
+# FOCUS
 # ==========================================================
 
 def propagate_q(q, z):
     return q + z
 
 def focus_condition(z, q_out):
-    qz = propagate_q(q_out, z)
-    return np.real(1.0 / qz)
+    return np.real(1.0 / (q_out + z))
 
 def find_focus_position(q_out, z_min=0.0, z_max=20000.0):
     try:
@@ -103,152 +106,80 @@ def find_focus_position(q_out, z_min=0.0, z_max=20000.0):
         )
         if sol.converged:
             return sol.root
-        else:
-            return np.nan
-    except ValueError:
-        return np.nan
+    except:
+        pass
+    return np.nan
 
 # ==========================================================
-# MEDIUM HELPERS
+# HELPERS
 # ==========================================================
 
 def get_starting_medium(elements):
     if not elements:
         return 1.0
-
     first = elements[0]
-
-    if first[0] == "free":
-        return first[2]
-
-    elif first[0] == "spherical":
-        return first[1]
-
-    return 1.0
+    return first[2] if first[0] == "free" else first[1]
 
 def get_output_medium(elements):
     if not elements:
         return 1.0
+    return elements[-1][2]
 
-    last = elements[-1]
+def auto_ylim_full_curve(ax, y, lower_pct=1, upper_pct=99, margin_frac=0.08):
+    y = np.asarray(y)
+    y = y[np.isfinite(y)]
 
-    if last[0] == "free":
-        return last[2]
+    if len(y) == 0:
+        return
 
-    elif last[0] == "spherical":
-        return last[2]
+    ymin = np.percentile(y, lower_pct)
+    ymax = np.percentile(y, upper_pct)
 
-    return 1.0
+    margin = margin_frac * (ymax - ymin)
+    ax.set_ylim(ymin - margin, ymax + margin)
 
-def fill_gradient(
-        ax,
-        z,
-        w,
-        cmap='viridis',
-        scale="Linear",
-        alpha=1.0,
-        r_scale=2.5,
-        z_res=400,
-        r_res=300
-    ):
-    """
-    Rysuje mapę intensywności wiązki Gaussa I(r,z)
-    Obsługuje skalę liniową i logarytmiczną.
-    """
+# ==========================================================
+# VISUALIZATION FUNCTIONS
+# ==========================================================
 
-    z = np.asarray(z)
-    w = np.abs(np.asarray(w))
+def fill_gradient(ax, z, w, cmap='viridis', scale="Linear", r_scale=3):
 
-    # ===== zakres radialny =====
     r_max = r_scale * np.nanmax(w)
-    if not np.isfinite(r_max) or r_max <= 0:
-        r_max = 1.0
+    r = np.linspace(-r_max, r_max, 250)
 
-    r = np.linspace(-r_max, r_max, r_res)
-    z_dense = np.linspace(z.min(), z.max(), z_res)
+    Z, R = np.meshgrid(z, r)
+    W = np.tile(w, (len(r), 1))
 
-    # ===== interpolacja w(z) =====
-    w_interp = np.interp(z_dense, z, w)
-    W = w_interp[np.newaxis, :]
-    R = r[:, np.newaxis]
+    I = np.exp(-2 * R**2 / W**2)
 
-    # ===== intensywność Gaussa =====
-    with np.errstate(divide='ignore', invalid='ignore'):
-        I = np.exp(-2 * (R**2) / (W**2))
-
-    I[~np.isfinite(I)] = 0.0
-
-    # ===== skala =====
     if scale == "Logarithmic":
         I = np.log10(I + 1e-12)
-        vmin = -6
-        vmax = 0
+        vmin, vmax = -6, 0
     else:
-        vmin = 0
-        vmax = 1
+        vmin, vmax = 0, 1
 
-    # ===== rysowanie =====
-    im = ax.pcolormesh(
-        z_dense,
-        r,
-        I,
-        shading='auto',
-        cmap=cmap,
-        vmin=vmin,
-        vmax=vmax,
-        alpha=alpha
-    )
-
-    ax.set_xlim(z.min(), z.max())
-    ax.set_ylim(-r_max, r_max)
+    ax.pcolormesh(Z, R, I, shading='auto', cmap=cmap, vmin=vmin, vmax=vmax)
     ax.set_xlabel("z [µm]")
     ax.set_ylabel("r [µm]")
 
-    return im
+def plot_beam_cross_section(ax, w_value, cmap, scale="Linear"):
 
-# ==========================================================
-# TRANSVERSE PROFILE
-# ==========================================================
-
-# ==========================================================
-# 2D BEAM PROFILE (VIEW FROM PROPAGATION DIRECTION)
-# ==========================================================
-
-def plot_beam_cross_section(
-        ax,
-        w_value,
-        cmap,
-        scale="Linear",
-        grid_size=300,
-        extent_scale=2
-    ):
-    """
-    Rysuje 2D przekrój wiązki Gaussa I(x,y)
-    """
-
-    x_max = extent_scale * w_value
-    x = np.linspace(-x_max, x_max, grid_size)
-    y = np.linspace(-x_max, x_max, grid_size)
+    x = np.linspace(-2*w_value, 2*w_value, 300)
+    y = np.linspace(-2*w_value, 2*w_value, 300)
 
     X, Y = np.meshgrid(x, y)
-
-    with np.errstate(divide='ignore', invalid='ignore'):
-        I = np.exp(-2 * (X**2 + Y**2) / (w_value**2))
-
-    I[~np.isfinite(I)] = 0.0
+    I = np.exp(-2*(X**2 + Y**2)/w_value**2)
 
     if scale == "Logarithmic":
         I = np.log10(I + 1e-12)
-        vmin = -6
-        vmax = 0
+        vmin, vmax = -6, 0
     else:
-        vmin = 0
-        vmax = 1
+        vmin, vmax = 0, 1
 
-    im = ax.imshow(
+    ax.imshow(
         I,
-        extent=[-x_max, x_max, -x_max, x_max],
-        origin='lower',
+        extent=[x.min(), x.max(), y.min(), y.max()],
+        origin="lower",
         cmap=cmap,
         vmin=vmin,
         vmax=vmax
@@ -257,37 +188,9 @@ def plot_beam_cross_section(
     ax.set_xlabel("x [µm]")
     ax.set_ylabel("y [µm]")
     ax.set_aspect("equal")
-    
-
-    return im
-
-
-def auto_ylim_full_curve(ax, y, lower_pct=1, upper_pct=99, margin_frac=0.08):
-    """
-    Pokazuje całą krzywą, ale ignoruje ekstremalne wartości (np. asymptoty).
-    Oś dostosowuje się automatycznie przy zmianie parametrów.
-    """
-
-    y = np.asarray(y)
-    y = y[np.isfinite(y)]
-
-    if len(y) == 0:
-        return
-
-    # percentyle zamiast min/max → odporność na asymptoty
-    ymin = np.percentile(y, lower_pct)
-    ymax = np.percentile(y, upper_pct)
-
-    if ymin == ymax:
-        ymin -= 1
-        ymax += 1
-
-    margin = margin_frac * (ymax - ymin)
-
-    ax.set_ylim(ymin - margin, ymax + margin)
 
 # ==========================================================
-# STREAMLIT UI
+# APP
 # ==========================================================
 
 st.set_page_config(layout="wide")
@@ -301,6 +204,7 @@ if "elements" not in st.session_state:
 # ==========================================================
 
 with st.sidebar:
+
     st.header("Optical System")
 
     element_type = st.selectbox(
@@ -326,8 +230,8 @@ with st.sidebar:
 
     if st.button("Clear system"):
         st.session_state.elements = []
+
     st.divider()
-    st.subheader("Visualization settings")
 
     int_cmap_label = st.selectbox(
         "Intensity colormap",
@@ -337,74 +241,285 @@ with st.sidebar:
 
     intensity_scale = st.selectbox(
         "Intensity scale",
-        ["Linear", "Logarithmic"],
-        index=0
+        ["Linear", "Logarithmic"]
     )
 
 int_cmap = INT_CMAPS[int_cmap_label]
 
 # ==========================================================
-# UKŁAD
+# GLOBAL R
+# ==========================================================
+
+R_value = 100.0
+if st.session_state.elements:
+    R_value = st.slider("Radius of curvature R [µm]", 1.0, 1000.0, 100.0)
+
+# ==========================================================
+# OPTICAL SYSTEM
 # ==========================================================
 
 st.subheader("Optical system")
 
 if st.session_state.elements:
-    for i, el in enumerate(st.session_state.elements):
-        if el[0] == "free":
-            st.write(f"{i+1}. propagation on distance — d={el[1]} µm in medium with refractive index n={el[2]}")
-        else:
-            st.write(f"{i+1}. Spherical surface between medium n1={el[1]} before lens and medium n2={el[2]} after lens") 
+
+    col_left, col_right = st.columns([1.4, 1])
+
+    # ------------------------------------------------------
+    # LEFT COLUMN
+    # ------------------------------------------------------
+
+    with col_left:
+
+        for i, el in enumerate(st.session_state.elements):
+
+            if el[0] == "free":
+
+                st.markdown(f"### {i+1}. Propagation in medium")
+
+                c1, c2, c3 = st.columns([4,4,1])
+
+                with c1:
+                    d_new = st.number_input(
+                        f"Distance d [µm] #{i+1}",
+                        value=float(el[1]),
+                        key=f"d_{i}"
+                    )
+
+                with c2:
+                    n_new = st.number_input(
+                        f"Refractive index n #{i+1}",
+                        value=float(el[2]),
+                        key=f"n_{i}"
+                    )
+
+                st.session_state.elements[i] = ("free", d_new, n_new)
+
+            else:
+
+                st.markdown(f"### {i+1}. Spherical surface")
+
+                c1, c2, c3 = st.columns([4,4,1])
+
+                with c1:
+                    n1_new = st.number_input(
+                        f"n1 #{i+1}",
+                        value=float(el[1]),
+                        key=f"n1_{i}"
+                    )
+
+                with c2:
+                    n2_new = st.number_input(
+                        f"n2 #{i+1}",
+                        value=float(el[2]),
+                        key=f"n2_{i}"
+                    )
+
+                st.session_state.elements[i] = ("spherical", n1_new, n2_new)
+
+            with c3:
+                if st.button("X", key=f"del_{i}"):
+                    st.session_state.elements.pop(i)
+                    st.rerun()
+
+            st.divider()
+
+    # ------------------------------------------------------
+    # RIGHT COLUMN - OPTICAL LAYOUT
+    # ------------------------------------------------------
+
+    with col_right:
+
+        st.markdown("### Optical layout")
+
+        fig_sys, ax_sys = plt.subplots(figsize=(7,3))
+        ax_sys.axhline(0, color="gray", lw=1)
+
+        x = 0
+        blue = "royalblue"
+
+        i = 0
+        while i < len(st.session_state.elements):
+
+            el = st.session_state.elements[i]
+
+            if el[0] == "free":
+
+                d = el[1]
+                n = el[2]
+
+                next_is_surface = (
+                    i + 1 < len(st.session_state.elements)
+                    and st.session_state.elements[i+1][0] == "spherical"
+                )
+
+                # ==================================================
+                # Propagation ended by spherical surface
+                # ==================================================
+                if next_is_surface:
+
+                    y_limit = min(HALF_APERTURE, abs(R_value) - 1e-6)
+                    y = np.linspace(-y_limit, y_limit, 400)
+
+                    sag = abs(R_value) - np.sqrt(R_value**2 - y**2)
+
+                    if flip_R:
+                        x_curve = x + d - sag
+                    else:
+                        x_curve = x + d + sag
+
+                    poly_x = [x, x + d]
+                    poly_y = [HALF_APERTURE, HALF_APERTURE]
+
+                    poly_x += list(x_curve[::-1])
+                    poly_y += list(y[::-1])
+
+                    poly_x += [x + d, x]
+                    poly_y += [-HALF_APERTURE, -HALF_APERTURE]
+
+                    ax_sys.fill(
+                        poly_x,
+                        poly_y,
+                        facecolor=blue,
+                        edgecolor="none",   # remove unwanted closing lines
+                        alpha=0.25
+                    )
+
+                    # And draw only the visible boundaries manually:
+
+                    # top edge ends at first curve point
+                    ax_sys.plot(
+                        [x, x_curve[0]],
+                        [HALF_APERTURE, HALF_APERTURE],
+                        color=blue,
+                        lw=1.5
+                    )
+
+                    # bottom edge ends at last curve point
+                    ax_sys.plot(
+                        [x, x_curve[-1]],
+                        [-HALF_APERTURE, -HALF_APERTURE],
+                        color=blue,
+                        lw=1.5
+                    )
+
+                    # curved side wall
+                    ax_sys.plot(
+                        x_curve,
+                        y,
+                        color=blue,
+                        lw=2
+                    )
+
+                    ax_sys.text(
+                        x + d/2,
+                        HALF_APERTURE + 8,
+                        f"n={n:.2f}",
+                        ha="center"
+                    )
+
+                    x = max(x_curve)
+                    i += 2
+                    continue
+
+                # ==================================================
+                # Standard propagation block
+                # ==================================================
+                else:
+
+                    rect = plt.Rectangle(
+                        (x, -HALF_APERTURE),
+                        d,
+                        FIBER_WIDTH,
+                        facecolor=blue,
+                        edgecolor=blue,
+                        alpha=0.25
+                    )
+
+                    ax_sys.add_patch(rect)
+
+                    ax_sys.text(
+                        x + d/2,
+                        HALF_APERTURE + 8,
+                        f"n={n:.2f}",
+                        ha="center"
+                    )
+
+                    x += d
+
+            elif el[0] == "spherical":
+
+                y_limit = min(HALF_APERTURE, abs(R_value) - 1e-6)
+                y = np.linspace(-y_limit, y_limit, 400)
+
+                sag = abs(R_value) - np.sqrt(R_value**2 - y**2)
+
+                if flip_R:
+                    x_curve = x - sag
+                else:
+                    x_curve = x + sag
+
+                ax_sys.plot(
+                    x_curve,
+                    y,
+                    color=blue,
+                    lw=2
+                )
+
+                x = max(x_curve)
+
+            i += 1
+
+        # Replace ONLY this part inside Optical layout section
+
+        ax_sys.set_xlim(-10, max(100, x + 20))
+        ax_sys.set_ylim(-80, 80)
+
+        # Add anchored Y scale in left corner
+        ax_sys.set_ylabel("y [µm]")
+        ax_sys.set_yticks([-62.5, 0, 62.5])
+        ax_sys.set_yticklabels(["-62.5", "0", "62.5"])
+
+        ax_sys.set_xlabel("z [µm]")
+
+        # Frame style
+        ax_sys.spines["top"].set_visible(False)
+        ax_sys.spines["right"].set_visible(False)
+        ax_sys.spines["left"].set_visible(True)
+        ax_sys.spines["bottom"].set_visible(True)
+
+        # Keep Y axis attached to left border
+        ax_sys.spines["left"].set_position(("axes", 0.0))
+
+        st.pyplot(fig_sys, width="stretch")
+
 else:
     st.info("No elements")
 
 # ==========================================================
-# OBLICZENIA
+# CALCULATIONS + PLOTS
 # ==========================================================
 
 if st.session_state.elements:
 
     st.divider()
-
-
-
-    # ======================================================
-    # GAUSSIAN BEAM
-    # ======================================================
-
-    st.divider()
     st.subheader("Propagation of Gaussian beam")
 
-   # ======================================================
-    # LAYOUT GŁÓWNY
-    # ======================================================
-
     left, right = st.columns([1.35, 1.0])
-
-
-    # ======================================================
-    # LEWA KOLUMNA — PROPAGACJA WIĄZKI
-    # ======================================================
 
     with left:
 
         with st.container(border=True):
 
-            st.subheader("Propagation of Gaussian beam")
-            lambda0 = st.slider("Wavelength λ0 [µm]", 0.2, 2.0, 1.0, 0.001, format="%.3f")
-            R_value = st.slider("Radius of curvature R [µm]", 1.0, 1000.0, 100.0, 1.0)
+            lambda0 = st.slider("Wavelength λ0 [µm]", 0.2, 2.0, 1.0, 0.001)
 
             M_total = calculate_system(st.session_state.elements, R_value, flip_R)
+
             w0_in = st.slider("Input waist [µm]", 1.0, 20.0, 3.0)
             zmax = st.slider("Propagation range [µm]", 10.0, 10000.0, 1000.0)
 
             n_start = get_starting_medium(st.session_state.elements)
             n_out = get_output_medium(st.session_state.elements)
 
-            st.caption(f"input medium: n = {n_start}")
-            st.caption(f"output medium: n = {n_out}")
-
-            # ===== ABCD =====
             q_in = q_waist(w0_in, n_start, lambda0)
             q_out = apply_abcd(M_total, q_in)
 
@@ -417,10 +532,6 @@ if st.session_state.elements:
             qz = q_out + z
             wz = np.array([w_from_q(qv, n_out, lambda0) for qv in qz])
 
-            # ======================================================
-            # WYBÓR POZYCJI PROFILU
-            # ======================================================
-
             z_profile = st.slider(
                 "Position of cross-section z [µm]",
                 0.0,
@@ -430,64 +541,27 @@ if st.session_state.elements:
 
             w_profile = np.interp(z_profile, z, wz)
 
-            col_prop, col_profile = st.columns([2.2, 1.2])
+            cA, cB = st.columns([2.2,1.2])
 
-
-            with col_prop:
-
+            with cA:
                 fig, ax = plt.subplots(figsize=(6,3))
+                fill_gradient(ax, z, wz, cmap=int_cmap, scale=intensity_scale)
+                ax.plot(z, wz, color="white")
+                ax.axvline(z_profile, color="red")
 
-                fill_gradient(
-                    ax,
-                    z,
-                    wz,
-                    cmap=int_cmap,
-                    scale=intensity_scale,
-                    r_scale=3
-                )
+                if np.isfinite(z_focus):
+                    ax.axvline(z_focus, ls="--", color="cyan")
 
-                ax.plot(z, wz, linewidth=1, color="white")
-                ax.set_xlabel("z [µm]")
-                ax.set_ylabel("w(z) [µm]")
-                ax.grid(True, alpha=0.3)
+                st.pyplot(fig, width="stretch")
 
-                # Linia ogniska
-                if np.isfinite(z_focus) and 0 <= z_focus <= zmax:
-                    ax.axvline(z_focus, linestyle="--", linewidth=1, color="cyan")
+            with cB:
+                fig2, ax2 = plt.subplots(figsize=(4,4))
+                plot_beam_cross_section(ax2, w_profile, int_cmap, intensity_scale)
+                st.pyplot(fig2, width="stretch")
 
-                # 🔴 Linia aktualnego przekroju
-                ax.axvline(
-                    z_profile,
-                    linestyle="-",
-                    linewidth=2,
-                    color="red"
-                )
-
-                st.pyplot(fig, width='stretch')
-
-            with col_profile:
-
-                fig_profile, ax_profile = plt.subplots(figsize=(4,4))
-
-                plot_beam_cross_section(
-                    ax_profile,
-                    w_profile,
-                    cmap=int_cmap,
-                    scale=intensity_scale
-                )
-
-                st.pyplot(fig_profile, width='stretch')
-
-        
-            # ===== metryki =====
             c1, c2, c3 = st.columns(3)
             c2.metric("Position of focus", f"{z_focus:.2f} µm")
             c3.metric("Minimal spot size", f"{w_waist:.3f} µm")
-
-
-    # ======================================================
-    # PRAWA KOLUMNA — ANALIZA R
-    # ======================================================
 
     with right:
 
@@ -495,11 +569,13 @@ if st.session_state.elements:
 
             st.subheader("Characteristics of microlens")
 
-            R_sweep = np.linspace(1.0, 1000.0, 200)
+            R_sweep = np.linspace(1,1000,200)
+
             z_list = []
             w_list = []
 
             for R_test in R_sweep:
+
                 M_test = calculate_system(st.session_state.elements, R_test, flip_R)
                 q_test = apply_abcd(M_test, q_in)
 
@@ -507,38 +583,26 @@ if st.session_state.elements:
                 z_list.append(zf)
 
                 zR = np.imag(q_test)
-                w_list.append(np.sqrt(lambda0 * zR / (np.pi * n_out)))
+                w_list.append(np.sqrt(lambda0*zR/(np.pi*n_out)))
 
             idx = np.argmin(np.abs(R_sweep - R_value))
 
-            # ===== wykresy obok siebie =====
-            
-            fig2, ax2 = plt.subplots(figsize=(3.5,2.6))
-            ax2.plot(R_sweep, z_list)
-            ax2.plot(R_sweep[idx], z_list[idx], "ro", markersize=6)
-            ax2.set_xlabel("R [µm]")
-            ax2.set_ylabel("Position of focus [µm]")
-            ax2.grid(True, alpha=0.3)
-
-            auto_ylim_full_curve(ax2, z_list)
-
-            st.pyplot(fig2, width='stretch')
-
-            # =========================
-            # w(R)
-            # =========================
-            
             fig3, ax3 = plt.subplots(figsize=(3.5,2.6))
-            ax3.plot(R_sweep, w_list)
-            ax3.plot(R_sweep[idx], w_list[idx], "ro", markersize=6)
+            ax3.plot(R_sweep, z_list)
+            ax3.plot(R_sweep[idx], z_list[idx], "ro")
             ax3.set_xlabel("R [µm]")
-            ax3.set_ylabel("Waist [µm]")
-            ax3.grid(True, alpha=0.3)
+            ax3.set_ylabel("Position of focus [µm]")
+            auto_ylim_full_curve(ax3, z_list)
+            st.pyplot(fig3, width="stretch")
 
-            auto_ylim_full_curve(ax3, w_list)
-
-            st.pyplot(fig3, width='stretch')
-
+            fig4, ax4 = plt.subplots(figsize=(3.5,2.6))
+            ax4.plot(R_sweep, w_list)
+            ax4.plot(R_sweep[idx], w_list[idx], "ro")
+            ax4.set_xlabel("R [µm]")
+            ax4.set_ylabel("Waist [µm]")
+            auto_ylim_full_curve(ax4, w_list)
+            st.pyplot(fig4, width="stretch")
 
 else:
     st.info("Add elements to the system in the left panel.")
+
