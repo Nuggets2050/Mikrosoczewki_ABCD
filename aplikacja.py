@@ -33,6 +33,16 @@ FIBER_WIDTH = 125.0
 HALF_APERTURE = FIBER_WIDTH / 2.0
 
 # ==========================================================
+# SESSION STATE
+# ==========================================================
+
+if "elements" not in st.session_state:
+    st.session_state.elements = []
+
+if "R_value" not in st.session_state:
+    st.session_state.R_value = 100.0
+
+# ==========================================================
 # ABCD MATRICES
 # ==========================================================
 
@@ -53,7 +63,6 @@ def calculate_system(elements, R_value, flip_R=False):
     for el in elements:
         if el[0] == "free":
             M = M_free_space(el[1], el[2])
-
         elif el[0] == "spherical":
             M = M_spherical(el[1], el[2], R_value, flip_R)
 
@@ -90,9 +99,6 @@ def w_from_q(q, n, lambda0):
 # FOCUS
 # ==========================================================
 
-def propagate_q(q, z):
-    return q + z
-
 def focus_condition(z, q_out):
     return np.real(1.0 / (q_out + z))
 
@@ -117,8 +123,7 @@ def find_focus_position(q_out, z_min=0.0, z_max=20000.0):
 def get_starting_medium(elements):
     if not elements:
         return 1.0
-    first = elements[0]
-    return first[2] if first[0] == "free" else first[1]
+    return elements[0][2] if elements[0][0] == "free" else elements[0][1]
 
 def get_output_medium(elements):
     if not elements:
@@ -128,18 +133,16 @@ def get_output_medium(elements):
 def auto_ylim_full_curve(ax, y, lower_pct=1, upper_pct=99, margin_frac=0.08):
     y = np.asarray(y)
     y = y[np.isfinite(y)]
-
     if len(y) == 0:
         return
 
     ymin = np.percentile(y, lower_pct)
     ymax = np.percentile(y, upper_pct)
-
     margin = margin_frac * (ymax - ymin)
     ax.set_ylim(ymin - margin, ymax + margin)
 
 # ==========================================================
-# VISUALIZATION FUNCTIONS
+# VISUALIZATION
 # ==========================================================
 
 def fill_gradient(ax, z, w, cmap='viridis', scale="Linear", r_scale=3):
@@ -196,9 +199,6 @@ def plot_beam_cross_section(ax, w_value, cmap, scale="Linear"):
 st.set_page_config(layout="wide")
 st.title("ABCD Matrix Method for Micro-Optical Systems")
 
-if "elements" not in st.session_state:
-    st.session_state.elements = []
-
 # ==========================================================
 # SIDEBAR
 # ==========================================================
@@ -245,14 +245,7 @@ with st.sidebar:
     )
 
 int_cmap = INT_CMAPS[int_cmap_label]
-
-# ==========================================================
-# GLOBAL R
-# ==========================================================
-
-R_value = 100.0
-if st.session_state.elements:
-    R_value = st.slider("Radius of curvature R [µm]", 1.0, 1000.0, 100.0)
+R_value = st.session_state.R_value
 
 # ==========================================================
 # OPTICAL SYSTEM
@@ -264,9 +257,9 @@ if st.session_state.elements:
 
     col_left, col_right = st.columns([1.4, 1])
 
-    # ------------------------------------------------------
+    # ======================================================
     # LEFT COLUMN
-    # ------------------------------------------------------
+    # ======================================================
 
     with col_left:
 
@@ -314,7 +307,24 @@ if st.session_state.elements:
                         key=f"n2_{i}"
                     )
 
+                with c3:
+                    if st.button("X", key=f"del_{i}"):
+                        st.session_state.elements.pop(i)
+                        st.rerun()
+
+                # NEW LOCATION OF R SLIDER
+                st.session_state.R_value = st.slider(
+                    f"Radius of curvature R [µm] #{i+1}",
+                    1.0,
+                    1000.0,
+                    float(st.session_state.R_value),
+                    key=f"R_slider_{i}"
+                )
+
                 st.session_state.elements[i] = ("spherical", n1_new, n2_new)
+
+                st.divider()
+                continue
 
             with c3:
                 if st.button("X", key=f"del_{i}"):
@@ -323,9 +333,9 @@ if st.session_state.elements:
 
             st.divider()
 
-    # ------------------------------------------------------
+    # ======================================================
     # RIGHT COLUMN - OPTICAL LAYOUT
-    # ------------------------------------------------------
+    # ======================================================
 
     with col_right:
 
@@ -352,9 +362,6 @@ if st.session_state.elements:
                     and st.session_state.elements[i+1][0] == "spherical"
                 )
 
-                # ==================================================
-                # Propagation ended by spherical surface
-                # ==================================================
                 if next_is_surface:
 
                     y_limit = min(HALF_APERTURE, abs(R_value) - 1e-6)
@@ -367,48 +374,26 @@ if st.session_state.elements:
                     else:
                         x_curve = x + d + sag
 
-                    poly_x = [x, x + d]
+                    poly_x = [x, x_curve[0]]
                     poly_y = [HALF_APERTURE, HALF_APERTURE]
 
                     poly_x += list(x_curve[::-1])
                     poly_y += list(y[::-1])
 
-                    poly_x += [x + d, x]
+                    poly_x += [x_curve[-1], x]
                     poly_y += [-HALF_APERTURE, -HALF_APERTURE]
 
                     ax_sys.fill(
                         poly_x,
                         poly_y,
                         facecolor=blue,
-                        edgecolor="none",   # remove unwanted closing lines
+                        edgecolor="none",
                         alpha=0.25
                     )
 
-                    # And draw only the visible boundaries manually:
-
-                    # top edge ends at first curve point
-                    ax_sys.plot(
-                        [x, x_curve[0]],
-                        [HALF_APERTURE, HALF_APERTURE],
-                        color=blue,
-                        lw=1.5
-                    )
-
-                    # bottom edge ends at last curve point
-                    ax_sys.plot(
-                        [x, x_curve[-1]],
-                        [-HALF_APERTURE, -HALF_APERTURE],
-                        color=blue,
-                        lw=1.5
-                    )
-
-                    # curved side wall
-                    ax_sys.plot(
-                        x_curve,
-                        y,
-                        color=blue,
-                        lw=2
-                    )
+                    ax_sys.plot([x, x_curve[0]], [HALF_APERTURE, HALF_APERTURE], color=blue, lw=1.5)
+                    ax_sys.plot([x, x_curve[-1]], [-HALF_APERTURE, -HALF_APERTURE], color=blue, lw=1.5)
+                    ax_sys.plot(x_curve, y, color=blue, lw=2)
 
                     ax_sys.text(
                         x + d/2,
@@ -421,9 +406,6 @@ if st.session_state.elements:
                     i += 2
                     continue
 
-                # ==================================================
-                # Standard propagation block
-                # ==================================================
                 else:
 
                     rect = plt.Rectangle(
@@ -458,36 +440,24 @@ if st.session_state.elements:
                 else:
                     x_curve = x + sag
 
-                ax_sys.plot(
-                    x_curve,
-                    y,
-                    color=blue,
-                    lw=2
-                )
-
+                ax_sys.plot(x_curve, y, color=blue, lw=2)
                 x = max(x_curve)
 
             i += 1
 
-        # Replace ONLY this part inside Optical layout section
-
         ax_sys.set_xlim(-10, max(100, x + 20))
         ax_sys.set_ylim(-80, 80)
 
-        # Add anchored Y scale in left corner
         ax_sys.set_ylabel("y [µm]")
         ax_sys.set_yticks([-62.5, 0, 62.5])
         ax_sys.set_yticklabels(["-62.5", "0", "62.5"])
 
         ax_sys.set_xlabel("z [µm]")
 
-        # Frame style
         ax_sys.spines["top"].set_visible(False)
         ax_sys.spines["right"].set_visible(False)
         ax_sys.spines["left"].set_visible(True)
         ax_sys.spines["bottom"].set_visible(True)
-
-        # Keep Y axis attached to left border
         ax_sys.spines["left"].set_position(("axes", 0.0))
 
         st.pyplot(fig_sys, width="stretch")
@@ -512,7 +482,11 @@ if st.session_state.elements:
 
             lambda0 = st.slider("Wavelength λ0 [µm]", 0.2, 2.0, 1.0, 0.001)
 
-            M_total = calculate_system(st.session_state.elements, R_value, flip_R)
+            M_total = calculate_system(
+                st.session_state.elements,
+                st.session_state.R_value,
+                flip_R
+            )
 
             w0_in = st.slider("Input waist [µm]", 1.0, 20.0, 3.0)
             zmax = st.slider("Propagation range [µm]", 10.0, 10000.0, 1000.0)
@@ -576,7 +550,12 @@ if st.session_state.elements:
 
             for R_test in R_sweep:
 
-                M_test = calculate_system(st.session_state.elements, R_test, flip_R)
+                M_test = calculate_system(
+                    st.session_state.elements,
+                    R_test,
+                    flip_R
+                )
+
                 q_test = apply_abcd(M_test, q_in)
 
                 zf = find_focus_position(q_test)
@@ -585,7 +564,7 @@ if st.session_state.elements:
                 zR = np.imag(q_test)
                 w_list.append(np.sqrt(lambda0*zR/(np.pi*n_out)))
 
-            idx = np.argmin(np.abs(R_sweep - R_value))
+            idx = np.argmin(np.abs(R_sweep - st.session_state.R_value))
 
             fig3, ax3 = plt.subplots(figsize=(3.5,2.6))
             ax3.plot(R_sweep, z_list)
@@ -605,4 +584,3 @@ if st.session_state.elements:
 
 else:
     st.info("Add elements to the system in the left panel.")
-
