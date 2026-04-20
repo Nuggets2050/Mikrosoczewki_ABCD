@@ -42,6 +42,9 @@ if "elements" not in st.session_state:
 if "R_value" not in st.session_state:
     st.session_state.R_value = 100.0
 
+if "reference_metrics" not in st.session_state:
+    st.session_state.reference_metrics = None
+
 # ==========================================================
 # ABCD MATRICES
 # ==========================================================
@@ -533,9 +536,62 @@ if st.session_state.elements:
                 plot_beam_cross_section(ax2, w_profile, int_cmap, intensity_scale)
                 st.pyplot(fig2, width="stretch")
 
-            c1, c2, c3 = st.columns(3)
-            c2.metric("Position of focus", f"{z_focus:.2f} µm")
-            c3.metric("Minimal spot size", f"{w_waist:.3f} µm")
+            st.markdown("""
+            <style>
+            .big-ref {
+                font-size: 42px;
+                font-weight: 800;
+                line-height: 1.1;
+            }
+            .big-ref-label {
+                font-size: 20px;
+                color: #888;
+                margin-bottom: 4px;
+            }
+            .big-ref-delta {
+                font-size: 22px;
+                font-weight: 700;
+                color: #00c853;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+            
+            c1, c2, c3, c4, c5 = st.columns([1.3, 1.5, 1.5, 1.5, 0.2])
+
+            with c1:
+                if st.button("Set as reference", use_container_width=True):
+                    st.session_state.reference_metrics = {
+                        "focus": float(z_focus) if np.isfinite(z_focus) else f"Brak ogniska",
+                        "spot": float(w_waist) if np.isfinite(w_waist) else np.nan,
+                    }
+
+                if st.button("Clear reference", use_container_width=True):
+                    st.session_state.reference_metrics = None
+                    st.rerun()
+
+            ref = st.session_state.reference_metrics
+
+            with c2:
+                delta_focus = z_focus - ref["focus"] if ref else 0
+                st.markdown(f'''
+                <div class="big-ref-label">Position of focus</div>
+                <div class="big-ref">{z_focus:.2f} µm</div>
+                <div class="big-ref-delta">{delta_focus:+.2f} µm</div>
+                ''', unsafe_allow_html=True)
+
+            with c3:
+                delta_spot = w_waist - ref["spot"] if ref else 0
+                st.markdown(f'''
+                <div class="big-ref-label">Minimal spot size</div>
+                <div class="big-ref">{w_waist:.3f} µm</div>
+                <div class="big-ref-delta">{delta_spot:+.3f} µm</div>
+                ''', unsafe_allow_html=True)
+            with c4:
+                st.markdown(f'''
+                <div class="big-ref-label">Current spot size</div>
+                <div class="big-ref">{w_profile:.3f} µm</div>
+                <div class="big-ref-delta">z = {z_profile:.1f} µm</div>
+                ''', unsafe_allow_html=True)
 
     with right:
 
