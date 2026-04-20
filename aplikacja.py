@@ -166,7 +166,7 @@ def fill_gradient(ax, z, w, cmap='viridis', scale="Linear", r_scale=3):
 
     ax.pcolormesh(Z, R, I, shading='auto', cmap=cmap, vmin=vmin, vmax=vmax)
     ax.set_xlabel("z [µm]")
-    ax.set_ylabel("r [µm]")
+    ax.set_ylabel("y [µm]")
 
 def plot_beam_cross_section(ax, w_value, cmap, scale="Linear"):
 
@@ -201,6 +201,19 @@ def plot_beam_cross_section(ax, w_value, cmap, scale="Linear"):
 
 st.set_page_config(layout="wide")
 st.title("ABCD Matrix Method for Micro-Optical Systems")
+
+st.markdown("""
+<style>
+
+/* pierwszy kontener z buttonem */
+.stButton:nth-of-type(1) button {
+    background-color: #0b5d1e !important;
+    color: white !important;
+    font-weight: 400;
+}
+</style>
+""", unsafe_allow_html=True)
+
 
 # ==========================================================
 # SIDEBAR
@@ -523,7 +536,6 @@ if st.session_state.elements:
             with cA:
                 fig, ax = plt.subplots(figsize=(6,3))
                 fill_gradient(ax, z, wz, cmap=int_cmap, scale=intensity_scale)
-                ax.plot(z, wz, color="white")
                 ax.axvline(z_profile, color="red")
 
                 if np.isfinite(z_focus):
@@ -539,20 +551,36 @@ if st.session_state.elements:
             st.markdown("""
             <style>
             .big-ref {
-                font-size: 42px;
+                font-size: 20px;
                 font-weight: 800;
                 line-height: 1.1;
             }
+
             .big-ref-label {
                 font-size: 20px;
                 color: #888;
                 margin-bottom: 4px;
             }
+
             .big-ref-delta {
                 font-size: 22px;
                 font-weight: 700;
                 color: #00c853;
             }
+
+            /* tylko przyciski w pierwszej kolumnie c1 */
+            div[data-testid="column"]:nth-of-type(1) .stButton:nth-of-type(1) button {
+                background-color: #c62828 !important;
+                color: white !important;
+                font-weight: 700 !important;
+            }
+
+            div[data-testid="column"]:nth-of-type(1) .stButton:nth-of-type(2) button {
+                background-color: #c62828 !important;
+                color: white !important;
+                font-weight: 700 !important;
+            }
+
             </style>
             """, unsafe_allow_html=True)
             
@@ -566,6 +594,7 @@ if st.session_state.elements:
                     }
 
                 if st.button("Clear reference", use_container_width=True):
+
                     st.session_state.reference_metrics = None
                     st.rerun()
 
